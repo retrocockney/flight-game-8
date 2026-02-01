@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Plane Shooter - Visible Enemies</title>
+  <style>
+    body{margin:0;overflow:hidden;background:black;}
+    canvas{display:block;margin:0 auto;}
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas" width="1000" height="600"></canvas>
+<script>
+const canvas=document.getElementById("gameCanvas");
+const ctx=canvas.getContext("2d");
+
+// ================= GAME STATE =================
+let gameState="title";
+
+// ================= MAP =================
+const TILE_SIZE=50;
+const MAP_COLS=60;
+const MAP_ROWS=60;
+const map=[];
+for(let y=0;y<MAP_ROWS;y++){
+  map[y]=[];
+  for(let x=0;x<MAP_COLS;x++){
+    if(x===0||y===0||x===MAP_COLS-1||y===MAP_ROWS-1||Math.random()<0.08){ map[y][x]=1; } 
+    else{ map[y][x]=0; }
+  }
+}
+
+// ================= PLAYER =================
+const plane={x:500,y:500,w:40,h:40,speed:5,lives:3};
+const keys={};
+const missiles=[];
+let lastShot={w:0,a:0,s:0,d:0};
+const SHOT_DELAY=1000;
+
+// ================= CAMERA =================
+const camera={x:0,y:0};
+
+// ================= ENEMIES =================
+const enemies=[];
+const enemyBullets=[];
+function spawnEnemy(){
+  let ex,ey;
+  do{
+    ex=Math.floor(Math.random()*(MAP_COLS-2)+1)*TILE_SIZE;
+    ey=Math.floor(Math.random()*(MAP_ROWS-2)+1)*TILE_SIZE;
+  }while(collidesWithWall(ex,ey,40,40));
+  enemies.push({x:ex,y:ey,w:40,h:40,speed:1.5,lastShot:0});
+}
+
+// ================= COLLISION =================
+function collidesWithWall(x,y,w,h){
+  const left=Math.floor(x/TILE_SIZE);
+  const right=Math.floor((x+w)/TILE_SIZE);
+  const top=Math.floor(y/TILE_SIZE);
+  const bottom=Math.floor((y+h)/TILE_SIZE);
+  for(let ty=top;ty<=bottom;ty++){
+    for(let tx=left;tx<=right;tx++){
+      if(map[ty] && map[ty][tx]===1) return true;
+    }
+  }
+  return false;
+}
+
+// ================= DRAW FUNCTIONS =================
+function drawMap(){
+  for(let y=0;y<MAP_ROWS;y++){
+    for(let x=0;x<MAP_COLS;x++){
+      if(map[y][x]===1){
+        ctx.fillStyle="#444";
+        ctx.fillRect(x*TILE_SIZE-camera.x,y*TILE_SIZE-camera.y,TILE_SIZE,TILE_SIZE);
+      }
+    }
+  }
+}
+
+function drawPlane(){ 
+  ctx.fillStyle="green"; 
+  ctx.fillRect(plane.x-camera.x,plane.y-camera.y,plane.w,plane.h); 
+}
+
+function drawMissiles(){ 
+  ctx.fillStyle="red"; 
+  missiles.forEach(m=>ctx.fillRect(m.x-camera.x,m.y-camera.y,m.w,m.h)); 
+}
+
+function drawEnemies(){ 
+  enemies.forEach(e=>{
+    ctx.fillStyle="red"; // bright red
+    ctx.fillRect(e.x-camera.x,e.y-camera.y,e.w,e.h);
+    ctx.strokeStyle="black"; // border
+    ctx.strokeRect(e.x-camera.x,e.y-camera.y,e.w,e.h);
+  });
+}
+
+function drawEnemyBullets(){ 
+  enemyBullets.forEach(b=>{
+    ctx.fillStyle="yellow"; // bright
+    ctx.fillRect(b.x-camera.x,b.y-camera.y,b.w,b.h);
+    ctx.strokeStyle="orange";
+    ctx.strokeRect(b.x-camera.x,b.y-camera.y,b.w,b.h);
+  });
+}
+
+function drawHUD(){ 
+  ctx.fillStyle="white"; 
+  ctx.font="20px Arial"; 
+  ctx.fillText("Lives:"+plane.lives,20,30); 
+  ctx.fillText("Score:"+score,880,30); 
+}
+
+// ================= TITLE =================
+function drawTitle(){
+  ctx.fillStyle="#87CEEB"; 
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="black"; 
+  ctx.font="50px Arial"; 
+  ctx.fillText("PLANE SHOOTER",330,200);
+  ctx.font="22px Arial"; 
+  ctx.fillText("Arrow Keys=Move",400,260);
+  ctx.fillText("W A S D=Shoot",420,300);
+  ctx.fillText("Press ENTER to Start",360,360);
+}
+
+// ================= UPDATE =================
+let score=0;
+function update(){
+  if(gameState!=="playing") return;
+
+  // PLAYER MOVE
+  let nextX=plane.x,nextY=plane.y;
+  if(keys.ArrowLeft) nextX-=plane.speed;
+  if(keys.ArrowRight) nextX+=plane.speed;
+  if(keys.ArrowUp) nextY-=plane.speed;
+  if(keys.ArrowDown) nextY+=plane.speed;
+  if(!collidesWithWall(nextX,plane.y,plane.w,plane.h)) plane.x=nextX;
+  if(!collidesWithWall(plane.x,nextY,plane.w,plane.h)) plane.y=nextY;
+
+  // CAMERA
+  camera.x=plane.x-canvas.width/2;
+  camera.y=plane.y-canvas.height/2;
+
+  // PLAYER MISSILES
+  missiles.forEach((m,i)=>{
+    m.x+=m.vx; m.y+=m.vy;
+    if(collidesWithWall(m.x,m.y,m.w,m.h)) missiles.splice(i,1);
+  });
+
+  // ENEMIES
+  enemies.forEach((e,ei)=>{
+    // move toward player
+    let dx=plane.x-e.x; let dy=plane.y-e.y;
+    let dist=Math.sqrt(dx*dx+dy*dy);
+    let vx=(dx/dist)*e.speed; let vy=(dy/dist)*e.speed;
+    if(!collidesWithWall(e.x+vx,e.y,e.w,e.h)) e.x+=vx;
+    if(!collidesWithWall(e.x,e.y+vy,e.w,e.h)) e.y+=vy;
+
+    // enemy shoots every 2s
+    const now=Date.now();
+    if(now-e.lastShot>2000){
+      const angle=Math.atan2(plane.y-e.y,plane.x-e.x);
+      enemyBullets.push({x:e.x+e.w/2,y:e.y+e.h/2,w:10,h:10,vx:Math.cos(angle)*4,vy:Math.sin(angle)*4});
+      e.lastShot=now;
+    }
+
+    // collision with player
+    if(e.x<plane.x+plane.w && e.x+e.w>plane.x && e.y<plane.y+plane.h && e.y+e.h>plane.y){
+      plane.lives--; enemies.splice(ei,1);
+      if(plane.lives<=0) gameState="gameover";
+    }
+
+    // collision with missiles
+    missiles.forEach((m,mi)=>{
+      if(m.x<m.x+e.w && m.x+m.w>e.x && m.y<m.y+e.h && m.y+m.h>e.y){
+        enemies.splice(ei,1); missiles.splice(mi,1); score+=10;
+      }
+    });
+  });
+
+  // ENEMY BULLETS
+  enemyBullets.forEach((b,i)=>{
+    b.x+=b.vx; b.y+=b.vy;
+    if(collidesWithWall(b.x,b.y,b.w,b.h)) enemyBullets.splice(i,1);
+    else if(b.x<plane.x+plane.w && b.x+b.w>plane.x && b.y<plane.y+plane.h && b.y+b.h>plane.y){
+      plane.lives--; enemyBullets.splice(i,1);
+      if(plane.lives<=0) gameState="gameover";
+    }
+  });
+}
+
+// ================= DRAW =================
+function draw(){
+  if(gameState==="title"){ drawTitle(); return; }
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawMap(); drawPlane(); drawEnemies(); drawMissiles(); drawEnemyBullets(); drawHUD();
+  if(gameState==="gameover"){ ctx.fillStyle="red"; ctx.font="50px Arial"; ctx.fillText("GAME OVER",360,300);}
+}
+
+// ================= LOOP =================
+function loop(){ update(); draw(); requestAnimationFrame(loop); }
+
+// ================= INPUT =================
+document.addEventListener("keydown",e=>{
+  keys[e.key]=true;
+  if(gameState==="title" && e.key==="Enter") gameState="playing";
+  const now=Date.now();
+  if(gameState==="playing" && "wasd".includes(e.key) && now-lastShot[e.key]>=SHOT_DELAY){
+    if(e.key==="w") missiles.push({x:plane.x+15,y:plane.y,w:10,h:20,vx:0,vy:-8});
+    if(e.key==="s") missiles.push({x:plane.x+15,y:plane.y+40,w:10,h:20,vx:0,vy:8});
+    if(e.key==="a") missiles.push({x:plane.x,y:plane.y+15,w:20,h:10,vx:-8,vy:0});
+    if(e.key==="d") missiles.push({x:plane.x+40,y:plane.y+15,w:20,h:10,vx:8,vy:0});
+    lastShot[e.key]=now;
+  }
+});
+document.addEventListener("keyup",e=>keys[e.key]=false);
+
+// spawn enemies every 2s
+setInterval(()=>{ if(gameState==="playing") spawnEnemy(); },2000);
+
+loop();
+</script>
+</body>
+</html>
